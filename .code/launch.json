@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Debug Current Python File",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${file}",
+        "env": {
+          "PYTHONPATH": "C:\\Users\\e430320\\myproject"
+        },
+        "console": "integratedTerminal"
+      },
+      {
+        "name": "Python: FastAPI",
+        "type": "debugpy",
+        "request": "launch",
+        "program": ".venv\\Scripts\\fastapi.exe",
+        "args": ["run", "main.py", "--host", "127.0.0.1", "--port=8080"],
+        "env": {
+          "PYTHONPATH": "C:\\Users\\e430320\\myproject"
+        },
+        "console": "integratedTerminal",
+        "justMyCode": true
+      }
+    ]
+  }
+  

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Clustering</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+            display: none;
+        }
+        .button {
+            display: inline-block;
+            background-color: #4CAF50;
+            color: white;
+            padding: 8px 12px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+        .json-response {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            display: none;
+        }
+        .loading {
+            text-align: center;
+            margin-top: 20px;
+            display: none;
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+        .success {
+            color: green;
+            margin-top: 10px;
+        }
+        .status-completed {
+            color: green;
+            font-weight: bold;
+        }
+        .status-failed, .status-error {
+            color: red;
+            font-weight: bold;
+        }
+        .status-processing {
+            color: blue;
+            font-weight: bold;
+        }
+        .status-queued {
+            color: orange;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Invoice Clustering</h1>
+    
+    <form id="clusterForm" enctype="multipart/form-data" method="post">
+        <div class="form-group">
+            <label for="zipFile">Upload Zip File (containing invoice images):</label>
+            <input type="file" id="zipFile" name="zip_file" accept=".zip" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="nClusters">Number of Clusters (optional):</label>
+            <input type="number" id="nClusters" name="n_clusters" min="2" placeholder="Auto-detect">
+        </div>
+        
+        <div class="form-group">
+            <label for="method">Clustering Method:</label>
+            <select id="method" name="method">
+                <option value="kmeans">K-Means</option>
+                <option value="dbscan">DBSCAN</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="visualize">Create Visualization:</label>
+            <select id="visualize" name="visualize">
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+            </select>
+        </div>
+        
+        <button type="submit">Cluster Invoices</button>
+    </form>
+    
+    <div class="loading" id="loading">
+        <p>Processing... This may take a few minutes.</p>
+        <p>Job ID: <span id="jobId"></span></p>
+        <p>Started at: <span id="startTime"></span></p>
+        <p>Status: <span id="pollingStatus" class="status-processing">Initializing...</span></p>
+        <p>Poll attempts: <span id="pollCount">0</span></p>
+    </div>
+    
+    <div class="result" id="result">
+        <h2>Clustering Results</h2>
+        <p>Status: <span id="status"></span></p>
+        <p>Message: <span id="message"></span></p>
+        <p>Number of Clusters: <span id="numClusters"></span></p>
+        <p>Images Processed: <span id="numImages"></span></p>
+        <p>Processing Time: <span id="processingTime"></span> seconds</p>
+        <p>Token Usage: <span id="tokenUsage"></span></p>
+        <p>Started at: <span id="jobStartTime"></span></p>
+        <p>Completed at: <span id="jobCompleteTime"></span></p>
+        <p id="downloadLink"></p>
+        <button id="viewJsonBtn" class="button">View JSON Response</button>
+        <button id="resetFormBtn" class="button" style="margin-left: 10px;">Reset Form</button>
+        <div id="jsonResponse" class="json-response"></div>
+    </div>
+    
+    <script>
+        // Add initial console log to verify script is running
+        console.log('Cluster form script initialized');
+        document.getElementById('clusterForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            console.log('Form submitted');
+            
+            const formData = new FormData(this);
+            
+            // Convert string values to appropriate types
+            const visualizeValue = formData.get('visualize');
+            if (visualizeValue === 'true') {
+                formData.set('visualize', 'true');
+            } else if (visualizeValue === 'false') {
+                formData.set('visualize', 'false');
+            }
+            
+            // If n_clusters is empty, remove it from the form data
+            if (formData.get('n_clusters') === '') {
+                formData.delete('n_clusters');
+            }
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('result');
+            
+            try {
+                // Hide previous results
+                result.style.display = 'none';
+                loading.style.display = 'block';
+                
+                // Submit the form
+                const response = await fetch('http://localhost:8080/cluster_invoice', {
+                    method: 'POST',
+                    body: formData,
+                    // Don't set Content-Type header, let the browser set it with the boundary
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Form submission response:', data);
+                document.getElementById('jobId').textContent = data.job_id;
+                
+                // Record start time
+                const startTime = new Date().toLocaleTimeString();
+                document.getElementById('startTime').textContent = startTime;
+                document.getElementById('jobStartTime').textContent = startTime;
+                
+                // Reset poll attempts counter
+                pollAttempts = 0;
+                
+                // Poll for job status
+                console.log('Starting polling for job:', data.job_id);
+                
+                // Make an immediate GET request to get the initial status
+                await checkJobStatus(data.job_id);
+                
+                // Then start polling
+                pollJobStatus(data.job_id);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                loading.style.display = 'none';
+                
+                // Display error in the result div with appropriate styling
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = 'error';
+                statusElement.classList.remove('status-completed', 'status-failed', 'status-processing', 'status-queued');
+                statusElement.classList.add('status-error');
+                document.getElementById('message').textContent = error.message;
+                
+                // Store error in JSON response
+                const jsonResponseElement = document.getElementById('jsonResponse');
+                jsonResponseElement.textContent = JSON.stringify({
+                    status: 'error',
+                    message: error.message,
+                    error: error.toString()
+                }, null, 2);
+                
+                // Show the result div
+                document.getElementById('result').style.display = 'block';
+            }
+        });
+        
+        // Keep track of polling attempts
+        let pollAttempts = 0;
+        const MAX_POLL_ATTEMPTS = 60; // 5 minutes (60 * 5 seconds)
+        
+        // Function to check job status once
+        async function checkJobStatus(jobId) {
+            try {
+                console.log(`Checking status for job ${jobId}`);
+                
+                const response = await fetch(`http://localhost:8080/cluster_status/${jobId}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log("Job status response:", data);
+                
+                // Update status with appropriate styling
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = data.status;
+                
+                // Remove any existing status classes
+                statusElement.classList.remove('status-completed', 'status-failed', 'status-processing', 'status-queued', 'status-error');
+                
+                // Add the appropriate status class
+                statusElement.classList.add(`status-${data.status}`);
+                document.getElementById('message').textContent = data.message;
+                
+                // Store the full JSON response for later viewing
+                const jsonResponseElement = document.getElementById('jsonResponse');
+                jsonResponseElement.textContent = JSON.stringify(data, null, 2);
+                
+                if (data.status === 'completed') {
+                    // Job completed, show results
+                    document.getElementById('numClusters').textContent = data.num_clusters || 'N/A';
+                    document.getElementById('numImages').textContent = data.num_images_processed || 'N/A';
+                    document.getElementById('processingTime').textContent = data.processing_time ? data.processing_time.toFixed(2) : 'N/A';
+                    document.getElementById('tokenUsage').textContent = data.token_usage || 'N/A';
+                    
+                    if (data.output_zip_url) {
+                        document.getElementById('downloadLink').innerHTML = `<a href="http://localhost:8080/download_clusters/${jobId}" class="button">Download Clustered Images</a>`;
+                    }
+                    
+                    // Record completion time
+                    document.getElementById('jobCompleteTime').textContent = new Date().toLocaleTimeString();
+                    
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('result').style.display = 'block';
+                    
+                    // Return true to indicate job is complete
+                    return true;
+                } else if (data.status === 'failed') {
+                    // Job failed
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('result').style.display = 'block';
+                    
+                    // Return true to indicate job is complete (even though it failed)
+                    return true;
+                }
+                
+                // Return false to indicate job is still processing
+                return false;
+                
+            } catch (error) {
+                console.error('Error checking job status:', error);
+                
+                // Update polling status to show error
+                const pollingStatus = document.getElementById('pollingStatus');
+                pollingStatus.textContent = `Error: ${error.message}`;
+                pollingStatus.classList.remove('status-processing', 'status-queued');
+                pollingStatus.classList.add('status-error');
+                
+                // Display error in the result div with appropriate styling
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = 'error';
+                statusElement.classList.remove('status-completed', 'status-failed', 'status-processing', 'status-queued');
+                statusElement.classList.add('status-error');
+                document.getElementById('message').textContent = error.message;
+                document.getElementById('result').style.display = 'block';
+                
+                // Store error in JSON response
+                const jsonResponseElement = document.getElementById('jsonResponse');
+                jsonResponseElement.textContent = JSON.stringify({
+                    status: 'error',
+                    message: error.message,
+                    error: error.toString()
+                }, null, 2);
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                // Return true to indicate we should stop polling
+                return true;
+            }
+        }
+        
+        // Function to poll job status repeatedly
+        async function pollJobStatus(jobId) {
+            pollAttempts++;
+            document.getElementById('pollCount').textContent = pollAttempts;
+            
+            // Update polling status
+            const pollingStatus = document.getElementById('pollingStatus');
+            pollingStatus.textContent = `Polling attempt ${pollAttempts}/${MAX_POLL_ATTEMPTS}`;
+            
+            // Update the polling status class based on progress
+            pollingStatus.classList.remove('status-error');
+            if (pollAttempts > MAX_POLL_ATTEMPTS * 0.8) {
+                pollingStatus.classList.add('status-queued'); // Almost timed out
+                pollingStatus.classList.remove('status-processing');
+            } else {
+                pollingStatus.classList.add('status-processing');
+                pollingStatus.classList.remove('status-queued');
+            }
+            
+            // Check if we've reached the maximum number of polling attempts
+            if (pollAttempts > MAX_POLL_ATTEMPTS) {
+                console.error("Polling timeout: Job is taking too long to complete");
+                
+                // Display error in the result div
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = 'error';
+                statusElement.classList.remove('status-completed', 'status-failed', 'status-processing', 'status-queued');
+                statusElement.classList.add('status-error');
+                document.getElementById('message').textContent = "Polling timeout: Job is taking too long to complete";
+                document.getElementById('result').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+                
+                return;
+            }
+            
+            // Check job status
+            const isComplete = await checkJobStatus(jobId);
+            
+            // If job is not complete, poll again after 5 seconds
+            if (!isComplete) {
+                console.log(`Job ${jobId} still processing, polling again in 5 seconds...`);
+                setTimeout(() => pollJobStatus(jobId), 5000);
+            } else {
+                console.log(`Job ${jobId} completed or failed, stopping polling`);
+            }
+        }
+        
+        // Add event listener for the View JSON Response button
+        document.getElementById('viewJsonBtn').addEventListener('click', function() {
+            const jsonResponse = document.getElementById('jsonResponse');
+            if (jsonResponse.style.display === 'block') {
+                jsonResponse.style.display = 'none';
+                this.textContent = 'View JSON Response';
+            } else {
+                jsonResponse.style.display = 'block';
+                this.textContent = 'Hide JSON Response';
+            }
+        });
+        
+        // Add event listener for the Reset Form button
+        document.getElementById('resetFormBtn').addEventListener('click', function() {
+            // Reset the form
+            document.getElementById('clusterForm').reset();
+            
+            // Hide the result and loading divs
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('loading').style.display = 'none';
+            
+            // Reset the JSON response
+            document.getElementById('jsonResponse').textContent = '';
+            document.getElementById('jsonResponse').style.display = 'none';
+            document.getElementById('viewJsonBtn').textContent = 'View JSON Response';
+        });
+    </script>
+</body>
+</html>
